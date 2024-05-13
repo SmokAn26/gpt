@@ -1,0 +1,388 @@
+using Borovikov_circus;
+using Npgsql;
+using System;
+using System.Data;
+using System.Drawing;
+using System.IO;
+using System.Windows.Forms;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
+
+namespace Borovikov_circus
+{
+    public partial class Form3_show : Form
+    {
+        private const string ConnectionString = "Host=172.20.7.6;Database=Borovikov;Username=st;Password=pwd";
+        private string selectedImagePath;
+
+        public Form3_show()
+        {
+            InitializeComponent();
+            LoadAllShows();
+            this.StartPosition = FormStartPosition.Manual;
+            this.Location = new Point(0, 0);
+        }
+
+        private void label14_Click(object sender, EventArgs e)
+        {
+            this.Hide();
+            Form5_menedzher form6 = new Form5_menedzher();
+            form6.Closed += (s, args) => this.Close();
+            form6.Show();
+        }
+
+        private void label8_Click(object sender, EventArgs e)
+        {
+            this.Hide();
+            Form6_lgot form5 = new Form6_lgot();
+            form5.Closed += (s, args) => this.Close();
+            form5.Show();
+        }
+        private void label13_Click(object sender, EventArgs e)
+        {
+            this.Hide();
+            Form7_pokaz form4 = new Form7_pokaz();
+            form4.Closed += (s, args) => this.Close();
+            form4.Show();
+        }
+
+        private void LoadAllShows()
+        {
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConnectionString))
+            {
+                connection.Open();
+                string query = "SELECT id, nazvatie, opisanie, vozrast_ogr, cena, photo FROM SHOW";
+                using (NpgsqlDataAdapter adapter = new NpgsqlDataAdapter(query, connection))
+                {
+                    DataTable showTable = new DataTable();
+                    adapter.Fill(showTable);
+
+                    dataGridView1.DataSource = showTable;
+                }
+            }
+        }
+
+        private void dataGridView1_SelectionChanged(object sender, EventArgs e)
+        {
+            if (dataGridView1.SelectedRows.Count > 0)
+            {
+                int selectedShowId = Convert.ToInt32(dataGridView1.SelectedRows[0].Cells["id"].Value);
+                LoadShowDetails(selectedShowId);
+                LoadAndDisplayImage(selectedShowId);
+            }
+        }
+
+        private void LoadShowDetails(int showId)
+        {
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConnectionString))
+            {
+                connection.Open();
+
+                string query = "SELECT nazvatie, opisanie, vozrast_ogr, cena FROM SHOW WHERE id = @ShowId";
+                using (NpgsqlCommand command = new NpgsqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@ShowId", showId);
+
+                    using (NpgsqlDataReader reader = command.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            textBox1.Text = reader["nazvatie"].ToString();
+                            textBox2.Text = reader["opisanie"].ToString();
+                            textBox4.Text = reader["vozrast_ogr"].ToString();
+                            textBox5.Text = reader["cena"].ToString();
+                        }
+                    }
+                }
+            }
+        }
+
+        private void LoadAndDisplayImage(int showId)
+        {
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConnectionString))
+            {
+                connection.Open();
+
+                string query = "SELECT photo FROM SHOW WHERE id = @ShowId";
+                using (NpgsqlCommand command = new NpgsqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@ShowId", showId);
+
+                    object result = command.ExecuteScalar();
+                    if (result != null && result != DBNull.Value)
+                    {
+                        string imagePath = result.ToString();
+
+                        if (File.Exists(imagePath))
+                        {
+                            pictureBox1.Image = ResizeImage(Image.FromFile(imagePath), 326, 351);
+                        }
+                        else
+                        {
+                            // Если файл изображения не найден, очистить PictureBox
+                            pictureBox1.Image = null;
+                        }
+                    }
+                    else
+                    {
+                        // Если результат пустой, очистить PictureBox
+                        pictureBox1.Image = null;
+                    }
+                }
+            }
+        }
+
+
+        private void button7_Click(object sender, EventArgs e)
+        {
+            using (OpenFileDialog openFileDialog = new OpenFileDialog())
+            {
+                openFileDialog.Filter = "Image Files|*.jpg;*.jpeg;*.png;*.gif;*.bmp";
+                openFileDialog.Title = "Выберите файл изображения";
+
+                if (openFileDialog.ShowDialog() == DialogResult.OK)
+                {
+                    selectedImagePath = openFileDialog.FileName;
+                    string destinationPath = Path.Combine("C:/Users/smoka/Desktop/дз/Курсовик (Цирк)/Borovikov_circus/posters", Path.GetFileName(selectedImagePath));
+
+                    File.Copy(selectedImagePath, destinationPath, true);
+
+                    Image originalImage = Image.FromFile(destinationPath);
+                    pictureBox1.Image = ResizeImage(originalImage, pictureBox1.Width, pictureBox1.Height);
+
+                    // Не сохраняем фотографию в базу данных сразу, только при нажатии на кнопку "Изменить" или "Сохранить"
+                    selectedImagePath = destinationPath;
+                }
+            }
+        }
+
+        private Image ResizeImage(Image sourceImage, int maxWidth, int maxHeight)
+        {
+            // Вычисляем соотношение сторон и масштабируем изображение
+            double ratioX = (double)maxWidth / sourceImage.Width;
+            double ratioY = (double)maxHeight / sourceImage.Height;
+            double ratio = Math.Min(ratioX, ratioY);
+
+            int newWidth = (int)(sourceImage.Width * ratio);
+            int newHeight = (int)(sourceImage.Height * ratio);
+
+            Bitmap resizedImage = new Bitmap(newWidth, newHeight);
+            using (Graphics g = Graphics.FromImage(resizedImage))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.DrawImage(sourceImage, 0, 0, newWidth, newHeight);
+            }
+            return resizedImage;
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            // Очищаем PictureBox и сбрасываем выбранный путь к изображению
+            pictureBox1.Image = null;
+            selectedImagePath = null;
+        }
+
+
+
+        private void UpdatePhotoPathInDatabase(string newPath, int showId)
+        {
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConnectionString))
+            {
+                connection.Open();
+                string query = "UPDATE SHOW SET photo = @NewPath WHERE id = @ShowId";
+                using (NpgsqlCommand command = new NpgsqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@NewPath", newPath);
+                    command.Parameters.AddWithValue("@ShowId", showId);
+                    command.ExecuteNonQuery();
+                }
+            }
+        }
+
+        private void button3_Click(object sender, EventArgs e)
+        {
+            // Сохранение изменений в базе данных
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConnectionString))
+            {
+                connection.Open();
+                string query = "UPDATE SHOW SET nazvatie = @Nazvatie, opisanie = @Opisanie, vozrast_ogr = @Vozrast_ogr, cena = @Cena, photo = @Photo WHERE id = @ShowId";
+                using (NpgsqlCommand command = new NpgsqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@Nazvatie", textBox1.Text);
+                    command.Parameters.AddWithValue("@Opisanie", textBox2.Text);
+                    command.Parameters.AddWithValue("@Vozrast_ogr", Convert.ToInt32(textBox4.Text));
+                    command.Parameters.AddWithValue("@Cena", Convert.ToInt32(textBox5.Text));
+
+                    // Проверяем, есть ли путь к изображению
+                    if (!string.IsNullOrEmpty(selectedImagePath))
+                    {
+                        command.Parameters.AddWithValue("@Photo", selectedImagePath); // Путь к фото
+                    }
+                    else
+                    {
+                        command.Parameters.AddWithValue("@Photo", ""); // Пустая строка
+                    }
+
+                    command.Parameters.AddWithValue("@ShowId", Convert.ToInt32(dataGridView1.SelectedRows[0].Cells["id"].Value));
+                    command.ExecuteNonQuery();
+                }
+            }
+            // Обновление отображаемых данных
+            LoadAllShows();
+        }
+
+
+
+
+        private void button4_Click(object sender, EventArgs e)
+        {
+            // Добавление нового шоу в базу данных
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConnectionString))
+            {
+                connection.Open();
+
+                string query = "INSERT INTO SHOW (nazvatie, opisanie, vozrast_ogr, cena, photo) VALUES (@Nazvatie, @Opisanie, @Vozrast_ogr, @Cena, @Photo)";
+                using (NpgsqlCommand command = new NpgsqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@Nazvatie", textBox1.Text);
+                    command.Parameters.AddWithValue("@Opisanie", textBox2.Text);
+                    command.Parameters.AddWithValue("@Vozrast_ogr", Convert.ToInt32(textBox4.Text));
+                    command.Parameters.AddWithValue("@Cena", Convert.ToInt32(textBox5.Text));
+
+                    // Проверка наличия пути к изображению
+                    if (selectedImagePath != null)
+                    {
+                        command.Parameters.AddWithValue("@Photo", selectedImagePath); // Путь к фото
+                    }
+                    else
+                    {
+                        command.Parameters.AddWithValue("@Photo", DBNull.Value); // Значение NULL
+                    }
+
+                    command.ExecuteNonQuery();
+                }
+            }
+
+            // Обновление отображаемых данных
+            LoadAllShows();
+        }
+
+
+        private void button5_Click(object sender, EventArgs e)
+        {
+            // Проверяем наличие текста в поле textBox3
+            if (string.IsNullOrWhiteSpace(textBox3.Text))
+            {
+                MessageBox.Show("Введите название шоу для поиска.");
+                return;
+            }
+
+            // Поиск шоу по названию
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConnectionString))
+            {
+                connection.Open();
+
+                string query = "SELECT id, nazvatie, opisanie, vozrast_ogr, cena FROM SHOW WHERE nazvatie ILIKE @Nazvatie";
+                using (NpgsqlDataAdapter adapter = new NpgsqlDataAdapter(query, connection))
+                {
+                    adapter.SelectCommand.Parameters.AddWithValue("@Nazvatie", "%" + textBox3.Text + "%");
+
+                    DataTable showTable = new DataTable();
+                    adapter.Fill(showTable);
+
+                    dataGridView1.DataSource = showTable;
+                }
+            }
+        }
+
+        private void button6_Click(object sender, EventArgs e)
+        {
+            // Проверяем наличие текста в поле textBoxPriceFilter
+            if (string.IsNullOrWhiteSpace(textBoxPriceFilter.Text))
+            {
+                MessageBox.Show("Введите значение стоимости.");
+                return;
+            }
+
+            // Пытаемся преобразовать текст в поле textBoxPriceFilter в десятичное число
+            if (!decimal.TryParse(textBoxPriceFilter.Text, out decimal maxPrice) || maxPrice < 0)
+            {
+                MessageBox.Show("Введите корректное положительное значение стоимости.");
+                return;
+            }
+
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConnectionString))
+            {
+                connection.Open();
+
+                string query = "SELECT id, nazvatie, opisanie, vozrast_ogr, cena FROM SHOW WHERE cena <= @MaxCena";
+                using (NpgsqlCommand command = new NpgsqlCommand(query, connection))
+                {
+                    // Добавляем параметр для фильтрации по максимальной стоимости
+                    command.Parameters.AddWithValue("@MaxCena", maxPrice);
+
+                    using (NpgsqlDataAdapter adapter = new NpgsqlDataAdapter(command))
+                    {
+                        DataTable showTable = new DataTable();
+                        adapter.Fill(showTable);
+
+                        dataGridView1.DataSource = showTable;
+                    }
+                }
+            }
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            if (dataGridView1.SelectedRows.Count > 0)
+            {
+                int selectedShowId = Convert.ToInt32(dataGridView1.SelectedRows[0].Cells["id"].Value);
+
+                // Удаляем выбранное шоу из базы данных
+                DeleteSelectedShowFromDatabase(selectedShowId);
+
+                // Обновляем отображаемые данные
+                LoadAllShows();
+            }
+        }
+
+        private void DeleteSelectedShowFromDatabase(int showId)
+        {
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConnectionString))
+            {
+                connection.Open();
+
+                string query = "DELETE FROM SHOW WHERE id = @ShowId";
+                using (NpgsqlCommand command = new NpgsqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@ShowId", showId);
+                    command.ExecuteNonQuery();
+                }
+            }
+        }
+
+        private void button8_Click(object sender, EventArgs e)
+        {
+            if (dataGridView1.SelectedRows.Count > 0)
+            {
+                int selectedShowId = Convert.ToInt32(dataGridView1.SelectedRows[0].Cells["id"].Value);
+                string selectedShowTitle = dataGridView1.SelectedRows[0].Cells["nazvatie"].Value.ToString();
+
+                // Создание новой формы Form7_Actors
+                Form8_acters form7 = new Form8_acters(selectedShowId);
+
+                // Установка названия выбранного шоу в свойство SelectedShowTitle
+                form7.SelectedShowTitle = selectedShowTitle;
+
+                // Отображение формы
+                form7.Show();
+            }
+        }
+
+        private void buttonVse_Click(object sender, EventArgs e)
+        {
+            textBox3.Text = "";
+            textBoxPriceFilter.Text = "";
+            LoadAllShows();
+        }
+    }
+}
